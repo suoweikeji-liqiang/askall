@@ -144,9 +144,10 @@
   margin-top: 0.75em;
   padding-top: 0.5em;
   border-top: 1px solid #f3f4f6;
+  flex-wrap: wrap;
 }
 
-.copy-btn {
+.action-btn {
   padding: 0.3em 0.75em;
   background: #f3f4f6;
   border: 1px solid #e5e7eb;
@@ -157,15 +158,59 @@
   transition: all 0.2s;
 }
 
-.copy-btn:hover {
+.action-btn:hover {
   background: #e5e7eb;
   color: #374151;
 }
 
-.copy-btn.copied {
+.action-btn.copied {
   background: #dcfce7;
   border-color: #86efac;
   color: #16a34a;
+}
+
+/* Forward dropdown */
+.forward-dropdown {
+  position: relative;
+}
+
+.forward-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  min-width: 120px;
+  z-index: 10;
+  overflow: hidden;
+}
+
+.forward-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.5em 0.75em;
+  text-align: left;
+  font-size: 0.8em;
+  color: #374151;
+  background: white;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.forward-menu-item:hover {
+  background: #f3f4f6;
+}
+
+.forward-menu-item:first-child {
+  border-radius: 7px 7px 0 0;
+}
+
+.forward-menu-item:last-child {
+  border-radius: 0 0 7px 7px;
 }
 
 /* Scrollbar styling */

@@ -6,15 +6,22 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 interface MessageContentProps {
     content: string;
     role?: 'user' | 'model';
+    source?: string;
     showCopyButton?: boolean;
+    connectedModels?: string[];
+    onForward?: (text: string, targetModel: string) => void;
 }
 
 export const MessageContent: React.FC<MessageContentProps> = ({
     content,
     role,
-    showCopyButton = true
+    source,
+    showCopyButton = true,
+    connectedModels = [],
+    onForward
 }) => {
     const [copied, setCopied] = useState(false);
+    const [showForwardMenu, setShowForwardMenu] = useState(false);
 
     const handleCopy = async () => {
         try {
@@ -25,6 +32,18 @@ export const MessageContent: React.FC<MessageContentProps> = ({
             console.error('Failed to copy:', err);
         }
     };
+
+    const handleForward = (targetModel: string) => {
+        if (onForward) {
+            // 发送时包含来源信息
+            const forwardText = `以下是${source || 'AI'}的回答，请评价或补充：\n\n${content}`;
+            onForward(forwardText, targetModel);
+        }
+        setShowForwardMenu(false);
+    };
+
+    // 过滤掉当前消息的来源模型
+    const availableModels = connectedModels.filter(m => m !== source);
 
     return (
         <div className="message-content-wrapper">
@@ -71,7 +90,6 @@ export const MessageContent: React.FC<MessageContentProps> = ({
                                 </div>
                             );
                         },
-                        // 表格样式
                         table({ children }) {
                             return (
                                 <div className="table-wrapper">
@@ -79,7 +97,6 @@ export const MessageContent: React.FC<MessageContentProps> = ({
                                 </div>
                             );
                         },
-                        // 引用块样式
                         blockquote({ children }) {
                             return <blockquote className="blockquote">{children}</blockquote>;
                         },
@@ -92,12 +109,37 @@ export const MessageContent: React.FC<MessageContentProps> = ({
             {showCopyButton && role === 'model' && (
                 <div className="message-actions">
                     <button
-                        className={`copy-btn ${copied ? 'copied' : ''}`}
+                        className={`action-btn ${copied ? 'copied' : ''}`}
                         onClick={handleCopy}
                         title="复制回答"
                     >
                         {copied ? '✓ 已复制' : '📋 复制'}
                     </button>
+
+                    {availableModels.length > 0 && onForward && (
+                        <div className="forward-dropdown">
+                            <button
+                                className="action-btn"
+                                onClick={() => setShowForwardMenu(!showForwardMenu)}
+                                title="转发给其他AI"
+                            >
+                                🔄 转发
+                            </button>
+                            {showForwardMenu && (
+                                <div className="forward-menu">
+                                    {availableModels.map(model => (
+                                        <button
+                                            key={model}
+                                            className="forward-menu-item"
+                                            onClick={() => handleForward(model)}
+                                        >
+                                            → {model.charAt(0).toUpperCase() + model.slice(1)}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -105,3 +147,4 @@ export const MessageContent: React.FC<MessageContentProps> = ({
 };
 
 export default MessageContent;
+

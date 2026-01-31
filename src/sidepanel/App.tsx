@@ -24,6 +24,16 @@ export default function App() {
   const [messages, setMessages] = useState<any[]>([])
   const [isSending, setIsSending] = useState(false)
 
+  // Debate mode
+  const [debateMode, setDebateMode] = useState(false)
+  const [debateConfig, setDebateConfig] = useState({
+    topic: '',
+    rounds: 3,
+    currentRound: 0,
+    isRunning: false,
+    participants: [] as string[]
+  })
+
   // Poll connection status
   useEffect(() => {
     const checkConnections = () => {
@@ -101,7 +111,59 @@ export default function App() {
   const handleClear = () => {
     if (messages.length > 0 && confirm('确定要清空所有对话吗？')) {
       setMessages([]);
+      setDebateConfig(prev => ({ ...prev, isRunning: false, currentRound: 0 }));
     }
+  };
+
+  // Get list of connected model names
+  const connectedModelList = Object.entries(connectionStatus)
+    .filter(([_, connected]) => connected)
+    .map(([key]) => key);
+
+  // Send to a specific model (used by forward)
+  const sendToModel = async (text: string, targetModel: string) => {
+    const userMsg = { id: Date.now(), role: 'user', text: `[转发] ${text.substring(0, 50)}...` };
+    setMessages(prev => [...prev, userMsg]);
+
+    const msgId = Date.now() + Math.random();
+    setMessages(prev => [...prev, {
+      id: msgId,
+      role: 'model',
+      source: targetModel,
+      text: 'Waiting for response...',
+      loading: true
+    }]);
+
+    chrome.runtime.sendMessage({ type: 'SEND_PROMPT', model: targetModel, text }, (response) => {
+      if (response && response.status !== 'sent') {
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: 'Error: ' + (response?.message || 'Unknown'), loading: false } : m));
+      }
+    });
+  };
+
+  // Handle forward from MessageContent
+  const handleForward = (text: string, targetModel: string) => {
+    sendToModel(text, targetModel);
+  };
+
+  // Start debate mode
+  const startDebate = async () => {
+    if (debateConfig.participants.length < 2 || !debateConfig.topic.trim()) return;
+
+    setDebateConfig(prev => ({ ...prev, isRunning: true, currentRound: 1 }));
+
+    // Add the debate topic as a user message
+    const topicMsg = { id: Date.now(), role: 'user', text: `🎯 辩论主题: ${debateConfig.topic}` };
+    setMessages(prev => [...prev, topicMsg]);
+
+    // First round: Ask first participant to give opening statement
+    const firstParticipant = debateConfig.participants[0];
+    const openingPrompt = `请就以下话题发表你的观点 (辩论第1轮开场陈述):\n\n"${debateConfig.topic}"\n\n请给出清晰的立场和论据。`;
+
+    sendToModel(openingPrompt, firstParticipant);
+
+    // Note: Subsequent rounds would be triggered by watching for responses
+    // This is a simplified version - full implementation would use useEffect to watch for complete responses
   };
 
   const handleSend = async () => {
@@ -151,13 +213,25 @@ export default function App() {
           AI Sidekick
         </h1>
         {messages.length > 0 && (
-          <button
-            onClick={handleClear}
-            className="text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50"
-            title="清空对话"
-          >
-            🗑️ 清空
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDebateMode(!debateMode)}
+              className={`text-xs px-2 py-1 rounded transition-colors ${debateMode
+                ? 'bg-purple-100 text-purple-600 border border-purple-200'
+                : 'text-gray-400 hover:text-purple-500 hover:bg-purple-50'
+                }`}
+              title="辩论模式"
+            >
+              ⚔️ 辩论
+            </button>
+            <button
+              onClick={handleClear}
+              className="text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50"
+              title="清空对话"
+            >
+              🗑️ 清空
+            </button>
+          </div>
         )}
       </header>
 
@@ -180,6 +254,86 @@ export default function App() {
           )
         })}
       </div>
+
+      {/* Debate Mode Panel */}
+      {debateMode && (
+        <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-purple-100">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-purple-700">⚔️ 辩论模式</span>
+              {debateConfig.isRunning && (
+                <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">
+                  第 {debateConfig.currentRound}/{debateConfig.rounds} 轮
+                </span>
+              )}
+            </div>
+
+            {!debateConfig.isRunning ? (
+              <>
+                <input
+                  type="text"
+                  placeholder="输入辩论主题..."
+                  value={debateConfig.topic}
+                  onChange={(e) => setDebateConfig(prev => ({ ...prev, topic: e.target.value }))}
+                  className="w-full text-sm px-3 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-gray-500">参与模型:</span>
+                  {connectedModelList.map(model => (
+                    <button
+                      key={model}
+                      onClick={() => {
+                        const isSelected = debateConfig.participants.includes(model);
+                        setDebateConfig(prev => ({
+                          ...prev,
+                          participants: isSelected
+                            ? prev.participants.filter(p => p !== model)
+                            : [...prev.participants, model]
+                        }));
+                      }}
+                      className={`text-xs px-2 py-1 rounded-full transition-colors ${debateConfig.participants.includes(model)
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-white text-gray-500 border border-gray-200'
+                        }`}
+                    >
+                      {model.charAt(0).toUpperCase() + model.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">轮数:</span>
+                  <select
+                    value={debateConfig.rounds}
+                    onChange={(e) => setDebateConfig(prev => ({ ...prev, rounds: parseInt(e.target.value) }))}
+                    className="text-xs px-2 py-1 border border-purple-200 rounded"
+                  >
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <option key={n} value={n}>{n} 轮</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => startDebate()}
+                    disabled={!debateConfig.topic.trim() || debateConfig.participants.length < 2}
+                    className="ml-auto text-xs px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    🚀 开始辩论
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-600">辩论进行中...</span>
+                <button
+                  onClick={() => setDebateConfig(prev => ({ ...prev, isRunning: false, currentRound: 0 }))}
+                  className="ml-auto text-xs px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                >
+                  ⏹️ 停止
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Chat Area */}
       <main className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -205,6 +359,9 @@ export default function App() {
                 <MessageContent
                   content={msg.text}
                   role={msg.role}
+                  source={msg.source}
+                  connectedModels={connectedModelList}
+                  onForward={handleForward}
                 />
               )}
             </div>
