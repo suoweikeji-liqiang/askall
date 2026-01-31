@@ -34,6 +34,17 @@ export default function App() {
     participants: [] as string[]
   })
 
+  // Phase 3: Layout, Export, Templates
+  const [layout, setLayout] = useState<'list' | 'compare'>('list')
+  const [showSettings, setShowSettings] = useState(false)
+  const [promptTemplates] = useState([
+    { id: 1, name: '简洁回答', prompt: '请用简洁的语言回答，不超过3句话：' },
+    { id: 2, name: '代码示例', prompt: '请给出代码示例：' },
+    { id: 3, name: '对比分析', prompt: '请对比分析以下内容的优缺点：' },
+    { id: 4, name: '逐步解释', prompt: '请一步一步解释：' },
+    { id: 5, name: '中文回答', prompt: '请用中文回答：' },
+  ])
+
   // Poll connection status
   useEffect(() => {
     const checkConnections = () => {
@@ -166,6 +177,36 @@ export default function App() {
     // This is a simplified version - full implementation would use useEffect to watch for complete responses
   };
 
+  // Export conversation as Markdown
+  const exportConversation = () => {
+    if (messages.length === 0) return;
+
+    const date = new Date().toLocaleDateString('zh-CN');
+    let markdown = `# AI Sidekick 对话记录\n\n📅 日期: ${date}\n\n---\n\n`;
+
+    messages.forEach(msg => {
+      if (msg.role === 'user') {
+        markdown += `## 👤 用户\n\n${msg.text}\n\n`;
+      } else {
+        markdown += `## 🤖 ${msg.source?.toUpperCase() || 'AI'}\n\n${msg.text}\n\n---\n\n`;
+      }
+    });
+
+    const blob = new Blob([markdown], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai-sidekick-chat-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Apply prompt template
+  const applyTemplate = (templatePrompt: string) => {
+    setInput(prev => templatePrompt + prev);
+    setShowSettings(false);
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isSending) return;
 
@@ -213,7 +254,27 @@ export default function App() {
           AI Sidekick
         </h1>
         {messages.length > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {/* Layout Toggle */}
+            <button
+              onClick={() => setLayout(layout === 'list' ? 'compare' : 'list')}
+              className={`text-xs px-2 py-1 rounded transition-colors ${layout === 'compare'
+                ? 'bg-blue-100 text-blue-600 border border-blue-200'
+                : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50'
+                }`}
+              title={layout === 'list' ? '切换到对比视图' : '切换到列表视图'}
+            >
+              {layout === 'list' ? '📊' : '📋'}
+            </button>
+            {/* Export */}
+            <button
+              onClick={exportConversation}
+              className="text-xs text-gray-400 hover:text-green-500 transition-colors px-2 py-1 rounded hover:bg-green-50"
+              title="导出对话"
+            >
+              💾
+            </button>
+            {/* Debate */}
             <button
               onClick={() => setDebateMode(!debateMode)}
               className={`text-xs px-2 py-1 rounded transition-colors ${debateMode
@@ -222,14 +283,15 @@ export default function App() {
                 }`}
               title="辩论模式"
             >
-              ⚔️ 辩论
+              ⚔️
             </button>
+            {/* Clear */}
             <button
               onClick={handleClear}
               className="text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50"
               title="清空对话"
             >
-              🗑️ 清空
+              🗑️
             </button>
           </div>
         )}
@@ -371,7 +433,41 @@ export default function App() {
 
       {/* Input Area */}
       <footer className="p-4 bg-white border-t border-gray-100">
+        {/* Prompt Templates */}
+        {showSettings && (
+          <div className="mb-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-600">📝 快速模板</span>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {promptTemplates.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => applyTemplate(t.prompt)}
+                  className="text-xs px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="relative">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={`absolute left-2 bottom-2 p-1.5 rounded-lg transition-colors ${showSettings ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+            title="快速模板"
+          >
+            📝
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -382,7 +478,7 @@ export default function App() {
               }
             }}
             placeholder="Ask anything..."
-            className="w-full resize-none bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-inner"
+            className="w-full resize-none bg-gray-50 border border-gray-200 rounded-xl pl-10 pr-12 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-inner"
             rows={1}
             style={{ minHeight: '44px', maxHeight: '120px' }}
           />
