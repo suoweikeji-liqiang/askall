@@ -1,42 +1,198 @@
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: left;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+/* Message Content Styles */
+.message-content-wrapper {
+  position: relative;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.message-content {
+  line-height: 1.6;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+.message-content p {
+  margin: 0 0 0.75em 0;
 }
 
-.card {
-  padding: 2em;
+.message-content p:last-child {
+  margin-bottom: 0;
 }
 
-.read-the-docs {
-  color: #888;
+.message-content ul,
+.message-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.message-content li {
+  margin: 0.25em 0;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin: 1em 0 0.5em 0;
+  font-weight: 600;
+}
+
+.message-content h1 {
+  font-size: 1.4em;
+}
+
+.message-content h2 {
+  font-size: 1.2em;
+}
+
+.message-content h3 {
+  font-size: 1.1em;
+}
+
+/* Inline code */
+.inline-code {
+  background: #f3f4f6;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-family: 'Fira Code', 'Monaco', monospace;
+  font-size: 0.9em;
+  color: #e83e8c;
+}
+
+/* Code block wrapper */
+.code-block-wrapper {
+  margin: 0.75em 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #282c34;
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5em 1em;
+  background: #21252b;
+  border-bottom: 1px solid #181a1f;
+}
+
+.code-language {
+  color: #9ca3af;
+  font-size: 0.75em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.code-copy-btn {
+  padding: 0.25em 0.75em;
+  background: #374151;
+  color: #d1d5db;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.75em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.code-copy-btn:hover {
+  background: #4b5563;
+  color: white;
+}
+
+/* Table wrapper */
+.table-wrapper {
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.table-wrapper table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.table-wrapper th,
+.table-wrapper td {
+  padding: 0.5em 0.75em;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.table-wrapper th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+/* Blockquote */
+.blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 1em;
+  border-left: 4px solid #3b82f6;
+  background: #f0f9ff;
+  border-radius: 0 8px 8px 0;
+  color: #374151;
+  font-style: italic;
+}
+
+/* Message actions */
+.message-actions {
+  display: flex;
+  gap: 0.5em;
+  margin-top: 0.75em;
+  padding-top: 0.5em;
+  border-top: 1px solid #f3f4f6;
+}
+
+.copy-btn {
+  padding: 0.3em 0.75em;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 0.75em;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.copy-btn:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.copy-btn.copied {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #16a34a;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

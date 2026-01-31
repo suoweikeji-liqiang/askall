@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { MessageContent } from './MessageContent'
 
 export default function App() {
   const [input, setInput] = useState('')
@@ -42,18 +43,15 @@ export default function App() {
     const messageListener = (message: any) => {
       if (message.type === 'AI_RESPONSE') {
         const { model, text, isComplete } = message;
-        console.log(`[SidePanel] AI_RESPONSE from ${model}, isComplete=${isComplete}, textLength=${text?.length}`);
 
         setMessages(prev => {
-          console.log(`[SidePanel] Current messages:`, prev.map(m => ({ source: m.source, role: m.role, loading: m.loading })));
           const newMessages = [...prev];
           // Find the last message from this model
           let foundIndex = -1;
           for (let i = newMessages.length - 1; i >= 0; i--) {
             if (newMessages[i].source === model && newMessages[i].role === 'model') {
               foundIndex = i;
-              console.log(`[SidePanel] Found matching message at index ${i}`);
-              break; // Found the latest one
+              break;
             }
           }
 
@@ -99,6 +97,12 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [isLoading]);
+
+  const handleClear = () => {
+    if (messages.length > 0 && confirm('确定要清空所有对话吗？')) {
+      setMessages([]);
+    }
+  };
 
   const handleSend = async () => {
     if (!input.trim() || isSending) return;
@@ -146,6 +150,15 @@ export default function App() {
         <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent">
           AI Sidekick
         </h1>
+        {messages.length > 0 && (
+          <button
+            onClick={handleClear}
+            className="text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50"
+            title="清空对话"
+          >
+            🗑️ 清空
+          </button>
+        )}
       </header>
 
       {/* Model Selector */}
@@ -170,6 +183,11 @@ export default function App() {
 
       {/* Chat Area */}
       <main className="flex-1 overflow-y-auto p-4 space-y-6">
+        {messages.length === 0 && (
+          <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+            选择模型并发送消息开始对话
+          </div>
+        )}
         {messages.map((msg) => (
           <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             {msg.role === 'model' && (
@@ -177,11 +195,18 @@ export default function App() {
                 {msg.source}
               </span>
             )}
-            <div className={`max-w-[90%] rounded-2xl p-3 text-sm leading-relaxed shadow-sm ${msg.role === 'user'
+            <div className={`max-w-[95%] rounded-2xl p-3 text-sm leading-relaxed shadow-sm ${msg.role === 'user'
               ? 'bg-blue-600 text-white rounded-br-none'
               : 'bg-white border border-gray-100 text-gray-700 rounded-bl-none'
               }`}>
-              {msg.text}
+              {msg.role === 'user' ? (
+                msg.text
+              ) : (
+                <MessageContent
+                  content={msg.text}
+                  role={msg.role}
+                />
+              )}
             </div>
           </div>
         ))}
