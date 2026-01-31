@@ -42,14 +42,17 @@ export default function App() {
     const messageListener = (message: any) => {
       if (message.type === 'AI_RESPONSE') {
         const { model, text, isComplete } = message;
+        console.log(`[SidePanel] AI_RESPONSE from ${model}, isComplete=${isComplete}, textLength=${text?.length}`);
 
         setMessages(prev => {
+          console.log(`[SidePanel] Current messages:`, prev.map(m => ({ source: m.source, role: m.role, loading: m.loading })));
           const newMessages = [...prev];
           // Find the last message from this model
           let foundIndex = -1;
           for (let i = newMessages.length - 1; i >= 0; i--) {
             if (newMessages[i].source === model && newMessages[i].role === 'model') {
               foundIndex = i;
+              console.log(`[SidePanel] Found matching message at index ${i}`);
               break; // Found the latest one
             }
           }

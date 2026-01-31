@@ -7,12 +7,15 @@ Object.defineProperty(document, 'visibilityState', { get: () => 'visible', confi
 
 // ===== STATE =====
 let lastSentText = "";
+let initialMessageCount = 0;
 let isWaitingForResponse = false;
 
 // ===== HELPER: Check current response and send to sidepanel =====
 function checkAndSendResponse() {
     const messages = document.querySelectorAll('div[class*="bubble-"], div[class*="answerItem-"]');
-    if (messages.length > 0) {
+
+    // Only process NEW messages (more than initial count)
+    if (messages.length > initialMessageCount) {
         const lastMessage = messages[messages.length - 1] as HTMLElement;
         const currentText = lastMessage.innerText;
 
@@ -52,6 +55,8 @@ async function fillAndSend(text: string) {
     const input = document.querySelector(inputSelector) as HTMLTextAreaElement;
     if (!input) throw new Error("Input field not found");
 
+    // Capture initial message count BEFORE sending to avoid stale data
+    initialMessageCount = document.querySelectorAll('div[class*="bubble-"], div[class*="answerItem-"]').length;
     lastSentText = "";
     isWaitingForResponse = true;
 

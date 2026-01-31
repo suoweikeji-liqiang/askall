@@ -8,12 +8,15 @@ Object.defineProperty(document, 'visibilityState', { get: () => 'visible', confi
 
 // ===== STATE =====
 let lastSentText = "";
+let initialMessageCount = 0; // Track message count before sending
 let isWaitingForResponse = false;
 
 // ===== HELPER: Check current response and send to sidepanel =====
 function checkAndSendResponse() {
     const messages = document.querySelectorAll('div[data-message-author-role="assistant"]');
-    if (messages.length > 0) {
+
+    // Only process NEW messages (more than initial count)
+    if (messages.length > initialMessageCount) {
         const lastMessage = messages[messages.length - 1] as HTMLElement;
         const currentText = lastMessage.innerText;
 
@@ -57,7 +60,8 @@ async function fillAndSend(text: string) {
     const inputEl = document.querySelector('#prompt-textarea') as HTMLElement;
     if (!inputEl) throw new Error("Input element (textarea/div) not found");
 
-    // Reset state for new request
+    // Capture initial message count BEFORE sending to avoid stale data
+    initialMessageCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
     lastSentText = "";
     isWaitingForResponse = true;
 
