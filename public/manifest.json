@@ -1,0 +1,102 @@
+{
+    "manifest_version": 3,
+    "name": "AI Sidekick",
+    "version": "1.0.0",
+    "description": "Multi-model AI Chat Sidebar",
+    "side_panel": {
+        "default_path": "sidepanel.html"
+    },
+    "permissions": [
+        "sidePanel",
+        "scripting",
+        "activeTab",
+        "storage",
+        "tabs"
+    ],
+    "host_permissions": [
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "*://*.kimi.moonshot.cn/*",
+        "*://*.kimi.com/*",
+        "*://*.qianwen.aliyun.com/*",
+        "*://*.tongyi.aliyun.com/*",
+        "*://*.qianwen.com/*",
+        "*://*.chatglm.cn/*",
+        "*://chat.z.ai/*",
+        "https://chat.deepseek.com/*"
+    ],
+    "background": {
+        "service_worker": "background.js",
+        "type": "module"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://chatgpt.com/*"
+            ],
+            "js": [
+                "content-chatgpt.js"
+            ],
+            "run_at": "document_end"
+        },
+        {
+            "matches": [
+                "*://kimi.moonshot.cn/*",
+                "*://*.kimi.moonshot.cn/*",
+                "*://kimi.com/*",
+                "*://*.kimi.com/*"
+            ],
+            "js": [
+                "content-kimi.js"
+            ],
+            "run_at": "document_end"
+        },
+        {
+            "matches": [
+                "*://qianwen.aliyun.com/*",
+                "*://*.qianwen.aliyun.com/*",
+                "*://tongyi.aliyun.com/*",
+                "*://*.tongyi.aliyun.com/*",
+                "*://qianwen.com/*",
+                "*://*.qianwen.com/*"
+            ],
+            "js": [
+                "content-qianwen.js"
+            ],
+            "run_at": "document_end"
+        },
+        {
+            "matches": [
+                "*://chatglm.cn/*",
+                "*://*.chatglm.cn/*",
+                "*://chat.z.ai/*"
+            ],
+            "js": [
+                "content-zhipu.js"
+            ],
+            "run_at": "document_end"
+        },
+        {
+            "matches": [
+                "https://chat.deepseek.com/*"
+            ],
+            "js": [
+                "content-deepseek.js"
+            ],
+            "run_at": "document_end"
+        },
+        {
+            "matches": [
+                "https://gemini.google.com/*"
+            ],
+            "js": [
+                "content-gemini.js"
+            ],
+            "run_at": "document_end"
+        }
+    ],
+    "action": {
+        "default_title": "Open AI Sidekick"
+    }
+}
