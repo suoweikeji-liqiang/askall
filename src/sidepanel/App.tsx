@@ -119,6 +119,56 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLoading]);
 
+  // Debate Mode: Auto-reply when a participant finishes
+  useEffect(() => {
+    if (!debateConfig.isRunning || isLoading) return;
+    if (debateConfig.currentRound > debateConfig.rounds) {
+      // Debate finished
+      setDebateConfig(prev => ({ ...prev, isRunning: false }));
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'user',
+        text: `🏁 辩论结束！共进行了 ${debateConfig.rounds} 轮。`
+      }]);
+      return;
+    }
+
+    // Find the last completed model message
+    const modelMessages = messages.filter(m => m.role === 'model' && !m.loading);
+    if (modelMessages.length === 0) return;
+
+    const lastMsg = modelMessages[modelMessages.length - 1];
+    const lastSource = lastMsg.source;
+
+    // Find next participant
+    const currentIndex = debateConfig.participants.indexOf(lastSource);
+    if (currentIndex === -1) return;
+
+    const isRoundComplete = currentIndex === debateConfig.participants.length - 1;
+    const nextIndex = isRoundComplete ? 0 : currentIndex + 1;
+    const nextParticipant = debateConfig.participants[nextIndex];
+
+    // Check if we already sent to this participant in the current context
+    const recentMessages = messages.slice(-3);
+    const alreadySent = recentMessages.some(m =>
+      m.role === 'model' && m.source === nextParticipant && m.loading
+    );
+    if (alreadySent) return;
+
+    // Update round if completing a cycle
+    if (isRoundComplete) {
+      setDebateConfig(prev => ({ ...prev, currentRound: prev.currentRound + 1 }));
+    }
+
+    // Send rebuttal prompt
+    const rebuttalPrompt = `${lastSource.toUpperCase()} 的观点是：\n\n"${lastMsg.text.substring(0, 500)}${lastMsg.text.length > 500 ? '...' : ''}"\n\n请针对以上观点进行反驳或补充（第${debateConfig.currentRound}轮）：`;
+
+    setTimeout(() => {
+      sendToModel(rebuttalPrompt, nextParticipant);
+    }, 1000); // Small delay for better UX
+
+  }, [messages, debateConfig, isLoading]);
+
   const handleClear = () => {
     if (messages.length > 0 && confirm('确定要清空所有对话吗？')) {
       setMessages([]);
@@ -398,37 +448,91 @@ export default function App() {
       )}
 
       {/* Chat Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-6">
+      <main className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 && (
-          <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+          <div className="flex-1 flex items-center justify-center text-gray-400 text-sm h-full">
             选择模型并发送消息开始对话
           </div>
         )}
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-            {msg.role === 'model' && (
-              <span className="text-[10px] font-bold tracking-wider text-gray-400 mb-1 ml-1 uppercase">
-                {msg.source}
-              </span>
-            )}
-            <div className={`max-w-[95%] rounded-2xl p-3 text-sm leading-relaxed shadow-sm ${msg.role === 'user'
-              ? 'bg-blue-600 text-white rounded-br-none'
-              : 'bg-white border border-gray-100 text-gray-700 rounded-bl-none'
-              }`}>
-              {msg.role === 'user' ? (
-                msg.text
-              ) : (
-                <MessageContent
-                  content={msg.text}
-                  role={msg.role}
-                  source={msg.source}
-                  connectedModels={connectedModelList}
-                  onForward={handleForward}
-                />
-              )}
-            </div>
+
+        {/* List Layout */}
+        {layout === 'list' && messages.length > 0 && (
+          <div className="space-y-6">
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                {msg.role === 'model' && (
+                  <span className="text-[10px] font-bold tracking-wider text-gray-400 mb-1 ml-1 uppercase">
+                    {msg.source}
+                  </span>
+                )}
+                <div className={`max-w-[95%] rounded-2xl p-3 text-sm leading-relaxed shadow-sm ${msg.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-br-none'
+                  : 'bg-white border border-gray-100 text-gray-700 rounded-bl-none'
+                  }`}>
+                  {msg.role === 'user' ? (
+                    msg.text
+                  ) : (
+                    <MessageContent
+                      content={msg.text}
+                      role={msg.role}
+                      source={msg.source}
+                      connectedModels={connectedModelList}
+                      onForward={handleForward}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
+
+        {/* Compare Layout */}
+        {layout === 'compare' && messages.length > 0 && (
+          <div className="space-y-4">
+            {/* User Messages */}
+            {messages.filter(m => m.role === 'user').map(msg => (
+              <div key={msg.id} className="bg-blue-600 text-white rounded-xl p-3 text-sm">
+                {msg.text}
+              </div>
+            ))}
+
+            {/* Model Responses Grid */}
+            {(() => {
+              const modelMessages = messages.filter(m => m.role === 'model');
+              const uniqueSources = [...new Set(modelMessages.map(m => m.source))];
+
+              if (uniqueSources.length === 0) return null;
+
+              return (
+                <div className={`grid gap-3 ${uniqueSources.length >= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {uniqueSources.map(source => {
+                    const sourceMessages = modelMessages.filter(m => m.source === source);
+                    const latestMsg = sourceMessages[sourceMessages.length - 1];
+
+                    return (
+                      <div key={source} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                        <div className="text-[10px] font-bold tracking-wider text-gray-400 mb-2 uppercase border-b pb-2">
+                          {source}
+                        </div>
+                        {latestMsg && (
+                          <div className="text-sm text-gray-700">
+                            <MessageContent
+                              content={latestMsg.text}
+                              role={latestMsg.role}
+                              source={latestMsg.source}
+                              connectedModels={connectedModelList}
+                              onForward={handleForward}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </main>
 
       {/* Input Area */}
