@@ -1,23 +1,30 @@
-# AI-Sidekick Installation Guide
+# AI Sidekick
 
-## 1. Prepare the Extension
-The extension has been built in the `dist` directory.
+一个浏览器扩展，让你在侧边栏同时向多个 AI 模型发送问题。
 
-## 2. Load into Chrome/Edge
-1.  Open your browser and navigate to the Extensions page:
-    *   **Chrome**: `chrome://extensions`
-    *   **Edge**: `edge://extensions`
-2.  Enable **Developer mode** (top right corner toggle).
-3.  Click **Load unpacked**.
-4.  Select the `dist` folder in this project:
-    *   `d:\study\23.gemini\18.chats\ai-sidekick\dist`
+## 支持的模型
 
-## 3. Usage
-1.  **Login**: Open a new tab and log in to [ChatGPT](https://chatgpt.com). Keep this tab open.
-2.  **Open Sidebar**: Click the "AI Sidekick" extension icon (it might be in the puzzle piece menu) or use the Side Panel selector to choose "AI Sidekick".
-3.  **Check Status**: In the sidebar, the "ChatGPT" pill should show a **Green Dot**.
-4.  **Send**: Type query in the sidebar and hit Enter. Watch the ChatGPT tab (if visible) or just wait for the status in the sidebar.
+- ChatGPT (chatgpt.com)
+- Gemini (gemini.google.com)
+- Kimi (kimi.moonshot.cn)
+- 通义千问 (tongyi.aliyun.com)
+- 智谱清言 (chatglm.cn)
+- DeepSeek (chat.deepseek.com)
 
-## Troubleshooting
-*   **Red/Grey Dot**: Ensure the ChatGPT tab is fully loaded and active. Refresh the ChatGPT tab.
-*   **Not Sending**: Check browser console (F12) for errors.
+## 安装
+
+1. `npm install`
+2. `npm run build`
+3. 打开 Chrome → `chrome://extensions/` → 开启开发者模式
+4. 点击"加载已解压的扩展程序"，选择 `dist` 目录
+
+## 使用
+
+1. 打开任意支持的 AI 网站标签页
+2. 点击扩展图标打开侧边栏
+3. 勾选要同时询问的模型
+4. 输入问题，点击发送
+
+## 已知问题
+
+- 后台标签页的响应更新可能需要手动切换标签页才能触发
