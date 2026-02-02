@@ -12,6 +12,16 @@ let activeTabs: Record<string, number | null> = {
     deepseek: null
 };
 
+// Store current requestId for each model to track which request we're waiting for
+let activeRequests: Record<string, string | null> = {
+    chatgpt: null,
+    gemini: null,
+    kimi: null,
+    qianwen: null,
+    zhipu: null,
+    deepseek: null
+};
+
 // Polling Loop removed (Moved to SidePanel-driven)
 // We will simply expose a "POLL_TABS" message that the SidePanel can trigger
 // This ensures we only poll when the UI is actually interested (SidePanel open and waiting)
@@ -64,15 +74,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message.type === 'POLL_TABS') {
-        // Efficiently ping all known active tabs
-        // We use the cached 'activeTabs' if available to avoid storming findTabs, 
-        // OR we can just check the specific model requested if we passed it.
-        // For simplicity/robustness, let's just use the current activeTabs state (which is updated by findTabs often enough)
-        // OR just call findTabs() since it's cleaner.
+        // Efficiently ping all known active tabs with their requestIds
         findTabs().then(tabs => {
-            Object.values(tabs).forEach(tabId => {
+            Object.entries(tabs).forEach(([model, tabId]) => {
                 if (tabId) {
-                    chrome.tabs.sendMessage(tabId, { type: 'CHECK_RESPONSE' }, (_response) => {
+                    const requestId = activeRequests[model as keyof typeof activeRequests];
+                    chrome.tabs.sendMessage(tabId, { 
+                        type: 'CHECK_RESPONSE',
+                        requestId: requestId  // Pass the requestId so content script knows which request we're waiting for
+                    }, (_response) => {
                         // Ignore errors (tab closed etc)
                         if (chrome.runtime.lastError) { }
                     });
@@ -84,14 +94,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message.type === 'SEND_PROMPT') {
-        const { model, text } = message;
+        const { model, text, requestId } = message;
+        
+        // Store the requestId for this model so we can track responses
+        if (requestId) {
+            activeRequests[model as keyof typeof activeRequests] = requestId;
+        }
+        
         // Always refresh tab list before sending to ensure we target the most recent one
         findTabs().then((tabs) => {
             const tabId = tabs[model as keyof typeof tabs];
 
             if (tabId) {
-                // Classic Message Passing
-                chrome.tabs.sendMessage(tabId, { type: 'INPUT_PROMPT', text }, (response) => {
+                // Classic Message Passing - include requestId
+                chrome.tabs.sendMessage(tabId, { type: 'INPUT_PROMPT', text, requestId }, (response) => {
                     if (chrome.runtime.lastError) {
                         const errMsg = chrome.runtime.lastError.message || "";
                         // If content script is missing (orphan tab), try to inject it
@@ -113,9 +129,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
                                     target: { tabId },
                                     files: [file]
                                 }).then(() => {
-                                    // Retry sending after injection
+                                    // Retry sending after injection - include requestId
                                     setTimeout(() => {
-                                        chrome.tabs.sendMessage(tabId, { type: 'INPUT_PROMPT', text }, (retryResponse) => {
+                                        chrome.tabs.sendMessage(tabId, { type: 'INPUT_PROMPT', text, requestId }, (retryResponse) => {
                                             if (chrome.runtime.lastError) {
                                                 sendResponse({ status: 'error', message: chrome.runtime.lastError.message });
                                             } else {

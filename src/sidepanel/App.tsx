@@ -23,6 +23,16 @@ export default function App() {
 
   const [messages, setMessages] = useState<any[]>([])
   const [isSending, setIsSending] = useState(false)
+  
+  // Track active requestIds for each model to match responses
+  const [activeRequestIds, setActiveRequestIds] = useState<Record<string, string | null>>({
+    chatgpt: null,
+    gemini: null,
+    kimi: null,
+    qianwen: null,
+    zhipu: null,
+    deepseek: null
+  })
 
   // Debate mode
   const [debateMode, setDebateMode] = useState(false)
@@ -63,38 +73,60 @@ export default function App() {
   useEffect(() => {
     const messageListener = (message: any) => {
       if (message.type === 'AI_RESPONSE') {
-        const { model, text, isComplete } = message;
+        const { model, text, isComplete, requestId } = message;
 
-        setMessages(prev => {
-          const newMessages = [...prev];
-          // Find the last message from this model
-          let foundIndex = -1;
-          for (let i = newMessages.length - 1; i >= 0; i--) {
-            if (newMessages[i].source === model && newMessages[i].role === 'model') {
-              foundIndex = i;
-              break;
+        // Verify requestId matches our active request for this model
+        // This prevents stale/old responses from being processed
+        setActiveRequestIds(currentIds => {
+          const expectedRequestId = currentIds[model as keyof typeof currentIds];
+          
+          // If requestId doesn't match, ignore this response (it's stale)
+          if (requestId && expectedRequestId && requestId !== expectedRequestId) {
+            console.log(`[App] Ignoring stale response from ${model}: expected ${expectedRequestId}, got ${requestId}`);
+            return currentIds;
+          }
+
+          // Valid response - update messages
+          setMessages(prev => {
+            const newMessages = [...prev];
+            // Find the last message from this model with matching requestId
+            let foundIndex = -1;
+            for (let i = newMessages.length - 1; i >= 0; i--) {
+              if (newMessages[i].source === model && 
+                  newMessages[i].role === 'model' &&
+                  (!requestId || newMessages[i].requestId === requestId)) {
+                foundIndex = i;
+                break;
+              }
             }
-          }
 
-          if (foundIndex !== -1) {
-            // Update existing message
-            newMessages[foundIndex] = {
-              ...newMessages[foundIndex],
-              text: text,
-              loading: !isComplete
-            };
-          } else {
-            // Should not happen normally if "Sending..." placeholder exists, 
-            // but if it does, append new
-            newMessages.push({
-              id: Date.now(),
-              role: 'model',
-              source: model,
-              text: text,
-              loading: !isComplete
-            });
+            if (foundIndex !== -1) {
+              // Update existing message
+              newMessages[foundIndex] = {
+                ...newMessages[foundIndex],
+                text: text,
+                loading: !isComplete
+              };
+            } else {
+              // Should not happen normally if "Sending..." placeholder exists, 
+              // but if it does, append new
+              newMessages.push({
+                id: Date.now(),
+                role: 'model',
+                source: model,
+                text: text,
+                requestId: requestId,
+                loading: !isComplete
+              });
+            }
+            return newMessages;
+          });
+
+          // If complete, clear the active requestId for this model
+          if (isComplete) {
+            return { ...currentIds, [model]: null };
           }
-          return newMessages;
+          return currentIds;
         });
       }
     };
@@ -186,18 +218,27 @@ export default function App() {
     const userMsg = { id: Date.now(), role: 'user', text: `[转发] ${text.substring(0, 50)}...` };
     setMessages(prev => [...prev, userMsg]);
 
+    // Generate unique requestId for this request
+    const requestId = `${targetModel}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Store the active requestId for this model
+    setActiveRequestIds(prev => ({ ...prev, [targetModel]: requestId }));
+
     const msgId = Date.now() + Math.random();
     setMessages(prev => [...prev, {
       id: msgId,
       role: 'model',
       source: targetModel,
       text: 'Waiting for response...',
+      requestId: requestId,
       loading: true
     }]);
 
-    chrome.runtime.sendMessage({ type: 'SEND_PROMPT', model: targetModel, text }, (response) => {
+    chrome.runtime.sendMessage({ type: 'SEND_PROMPT', model: targetModel, text, requestId }, (response) => {
       if (response && response.status !== 'sent') {
         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: 'Error: ' + (response?.message || 'Unknown'), loading: false } : m));
+        // Clear requestId on error
+        setActiveRequestIds(prev => ({ ...prev, [targetModel]: null }));
       }
     });
   };
@@ -271,24 +312,38 @@ export default function App() {
       .filter(([key, active]) => active && connectionStatus[key as keyof typeof connectionStatus])
       .map(([key]) => key);
 
+    // Generate requestIds for all target models
+    const newRequestIds: Record<string, string> = {};
     for (const model of targets) {
-      // Optimistic UI: Add loading message
+      newRequestIds[model] = `${model}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+    
+    // Update active requestIds
+    setActiveRequestIds(prev => ({ ...prev, ...newRequestIds }));
+
+    for (const model of targets) {
+      const requestId = newRequestIds[model];
+      
+      // Optimistic UI: Add loading message with requestId
       const msgId = Date.now() + Math.random();
       setMessages(prev => [...prev, {
         id: msgId,
         role: 'model',
         source: model,
         text: 'Waiting for response...',
+        requestId: requestId,
         loading: true
       }]);
 
-      chrome.runtime.sendMessage({ type: 'SEND_PROMPT', model, text: textToSend }, (response) => {
+      chrome.runtime.sendMessage({ type: 'SEND_PROMPT', model, text: textToSend, requestId }, (response) => {
         // Handle basic acknowledgement
         if (response && response.status === 'sent') {
           // We don't update text here anymore, we wait for AI_RESPONSE
-          console.log(`Prompt sent to ${model}`);
+          console.log(`Prompt sent to ${model} with requestId ${requestId}`);
         } else {
           setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: 'Error sending: ' + (response?.message || 'Unknown'), loading: false } : m));
+          // Clear requestId on error
+          setActiveRequestIds(prev => ({ ...prev, [model]: null }));
         }
       });
     }

@@ -7,8 +7,10 @@ Object.defineProperty(document, 'visibilityState', { get: () => 'visible', confi
 
 // ===== STATE =====
 let lastSentText = "";
+let lastKnownMessageText = ""; // Snapshot of last message BEFORE sending new request
 let initialMessageCount = 0; // Track message count before sending
 let isWaitingForResponse = false;
+let currentRequestId: string | null = null; // Track which request we're responding to
 
 // ===== HELPER: Get AI assistant messages =====
 function getAssistantMessages() {
@@ -32,7 +34,11 @@ function getAssistantMessages() {
 }
 
 // ===== HELPER: Check current response and send to sidepanel =====
-function checkAndSendResponse() {
+function checkAndSendResponse(expectedRequestId?: string) {
+    // Only respond if we have an active request and it matches what's being polled
+    if (!currentRequestId) return;
+    if (expectedRequestId && expectedRequestId !== currentRequestId) return;
+
     const messages = getAssistantMessages();
 
     // Only process NEW messages (more than initial count)
@@ -40,15 +46,26 @@ function checkAndSendResponse() {
         const lastMessage = messages[messages.length - 1] as HTMLElement;
         const currentText = lastMessage.innerText?.trim();
 
-        if (currentText && currentText !== lastSentText) {
+        // Must be different from snapshot AND from last sent text (avoid duplicates)
+        if (currentText && 
+            currentText !== lastSentText && 
+            currentText !== lastKnownMessageText) {
+            
             console.log(`[Zhipu] New message detected, length: ${currentText.length}`);
             lastSentText = currentText;
+            const isComplete = !isWaitingForResponse;
+
             chrome.runtime.sendMessage({
                 type: 'AI_RESPONSE',
                 model: 'zhipu',
                 text: currentText,
-                isComplete: !isWaitingForResponse
+                requestId: currentRequestId,
+                isComplete: isComplete
             }).catch(() => { });
+
+            if (isComplete) {
+                console.log(`[Zhipu] Request ${currentRequestId} completed`);
+            }
         }
     }
 }
@@ -56,7 +73,7 @@ function checkAndSendResponse() {
 // ===== MESSAGE LISTENER =====
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.type === 'INPUT_PROMPT') {
-        fillAndSend(request.text).then(() => {
+        fillAndSend(request.text, request.requestId).then(() => {
             sendResponse({ status: 'sent' });
         }).catch(err => {
             console.error('[Zhipu] fillAndSend error:', err);
@@ -67,13 +84,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
     // Handle CHECK_RESPONSE from background polling
     if (request.type === 'CHECK_RESPONSE') {
-        checkAndSendResponse();
+        checkAndSendResponse(request.requestId);
         sendResponse({ status: 'checked' });
         return false;
     }
 });
 
-async function fillAndSend(text: string) {
+async function fillAndSend(text: string, requestId?: string) {
     // Try multiple input selectors
     const inputSelectors = [
         'textarea[placeholder*="输入"]',
@@ -94,9 +111,22 @@ async function fillAndSend(text: string) {
 
     if (!input) throw new Error("Input field not found - tried: " + inputSelectors.join(', '));
 
-    // Capture initial message count BEFORE sending to avoid stale data
-    initialMessageCount = getAssistantMessages().length;
+    // Set the request ID for this request
+    currentRequestId = requestId || Date.now().toString();
+    console.log(`[Zhipu] Starting request ${currentRequestId}`);
+
+    // Capture initial message count and snapshot BEFORE sending
+    const messages = getAssistantMessages();
+    initialMessageCount = messages.length;
     console.log(`[Zhipu] Initial message count: ${initialMessageCount}`);
+    
+    // Take snapshot of last message to avoid sending stale responses
+    if (messages.length > 0) {
+        lastKnownMessageText = (messages[messages.length - 1] as HTMLElement).innerText?.trim() || "";
+    } else {
+        lastKnownMessageText = "";
+    }
+    
     lastSentText = "";
     isWaitingForResponse = true;
 
