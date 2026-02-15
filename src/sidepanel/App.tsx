@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { MessageContent } from './MessageContent'
 
 export default function App() {
@@ -25,7 +25,7 @@ export default function App() {
   const [isSending, setIsSending] = useState(false)
   
   // Track active requestIds for each model to match responses
-  const [activeRequestIds, setActiveRequestIds] = useState<Record<string, string | null>>({
+  const [_activeRequestIds, setActiveRequestIds] = useState<Record<string, string | null>>({
     chatgpt: null,
     gemini: null,
     kimi: null,
@@ -46,6 +46,7 @@ export default function App() {
 
   // Phase 3: Layout, Export, Templates
   const [layout, setLayout] = useState<'list' | 'compare'>('list')
+  const [compareActiveModel, setCompareActiveModel] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [promptTemplates] = useState([
     { id: 1, name: '简洁回答', prompt: '请用简洁的语言回答，不超过3句话：' },
@@ -151,6 +152,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLoading]);
 
+  // Auto-scroll to latest message
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   // Debate Mode: Auto-reply when a participant finishes
   useEffect(() => {
     if (!debateConfig.isRunning || isLoading) return;
@@ -229,7 +236,7 @@ export default function App() {
       id: msgId,
       role: 'model',
       source: targetModel,
-      text: 'Waiting for response...',
+      text: '',
       requestId: requestId,
       loading: true
     }]);
@@ -267,6 +274,85 @@ export default function App() {
     // Note: Subsequent rounds would be triggered by watching for responses
     // This is a simplified version - full implementation would use useEffect to watch for complete responses
   };
+
+  // Reflection mode: collect all model answers and ask each model to synthesize
+  const triggerReflection = () => {
+    // Find the last user message
+    const lastUserMsgIndex = messages.map(m => m.role).lastIndexOf('user');
+    if (lastUserMsgIndex === -1) return;
+
+    const lastUserMsg = messages[lastUserMsgIndex];
+    // Collect completed model responses after the last user message
+    const modelResponses = messages
+      .slice(lastUserMsgIndex + 1)
+      .filter(m => m.role === 'model' && !m.loading && m.text);
+
+    if (modelResponses.length < 2) return;
+
+    // Build reflection prompt
+    const answersBlock = modelResponses
+      .map(m => `【${(m.source || 'AI').toUpperCase()}】的回答：\n${m.text}`)
+      .join('\n\n');
+
+    const reflectionPrompt = `以下是多个AI模型对同一问题的回答，请你：
+1. 找出各回答的共识点
+2. 指出各回答的主要分歧
+3. 综合所有观点，给出你认为最准确的回答
+
+原始问题：${lastUserMsg.text}
+
+${answersBlock}
+
+请给出你的综合分析：`;
+
+    // Add a system message indicating reflection started
+    setMessages(prev => [...prev, {
+      id: Date.now(),
+      role: 'user',
+      text: '🔍 反思模式：请综合分析以上所有回答'
+    }]);
+
+    // Send to all selected & connected models in parallel
+    const targets = Object.entries(selectedModels)
+      .filter(([key, active]) => active && connectionStatus[key as keyof typeof connectionStatus])
+      .map(([key]) => key);
+
+    const newRequestIds: Record<string, string> = {};
+    for (const model of targets) {
+      newRequestIds[model] = `${model}-reflect-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+    setActiveRequestIds(prev => ({ ...prev, ...newRequestIds }));
+
+    for (const model of targets) {
+      const requestId = newRequestIds[model];
+      const msgId = Date.now() + Math.random();
+      setMessages(prev => [...prev, {
+        id: msgId,
+        role: 'model',
+        source: model,
+        text: '',
+        requestId: requestId,
+        loading: true
+      }]);
+
+      chrome.runtime.sendMessage({ type: 'SEND_PROMPT', model, text: reflectionPrompt, requestId }, (response) => {
+        if (response && response.status !== 'sent') {
+          setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: 'Error: ' + (response?.message || 'Unknown'), loading: false } : m));
+          setActiveRequestIds(prev => ({ ...prev, [model]: null }));
+        }
+      });
+    }
+  };
+
+  // Check if reflection is available: at least 2 models completed in the last round
+  const canReflect = (() => {
+    const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
+    if (lastUserIdx === -1) return false;
+    const lastRound = messages.slice(lastUserIdx + 1);
+    const completed = lastRound.filter(m => m.role === 'model' && !m.loading && m.text);
+    const uniqueSources = [...new Set(completed.map(m => m.source))];
+    return uniqueSources.length >= 2 && !lastRound.some(m => m.loading);
+  })();
 
   // Export conversation as Markdown
   const exportConversation = () => {
@@ -330,7 +416,7 @@ export default function App() {
         id: msgId,
         role: 'model',
         source: model,
-        text: 'Waiting for response...',
+        text: '',
         requestId: requestId,
         loading: true
       }]);
@@ -390,6 +476,18 @@ export default function App() {
             >
               ⚔️
             </button>
+            {/* Reflection */}
+            <button
+              onClick={triggerReflection}
+              disabled={!canReflect}
+              className={`text-xs px-2 py-1 rounded transition-colors ${canReflect
+                ? 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'
+                : 'text-gray-300 cursor-not-allowed'
+                }`}
+              title="反思模式：综合分析所有回答"
+            >
+              🔍
+            </button>
             {/* Clear */}
             <button
               onClick={handleClear}
@@ -406,6 +504,7 @@ export default function App() {
       <div className="px-4 py-2 bg-white border-b border-gray-100 flex gap-2 overflow-x-auto no-scrollbar">
         {Object.entries(selectedModels).map(([key, active]) => {
           const isConnected = connectionStatus[key as keyof typeof connectionStatus];
+          const isModelLoading = messages.some(m => m.source === key && m.loading);
           return (
             <button
               key={key}
@@ -415,7 +514,7 @@ export default function App() {
                 : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
                 }`}
             >
-              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-gray-300'}`}></span>
+              <span className={`w-2 h-2 rounded-full ${isModelLoading ? 'bg-blue-400 animate-pulse' : isConnected ? 'bg-green-400' : 'bg-gray-300'}`}></span>
               {key.charAt(0).toUpperCase() + key.slice(1)}
             </button>
           )
@@ -510,84 +609,154 @@ export default function App() {
           </div>
         )}
 
-        {/* List Layout */}
+        {/* List Layout - Grouped by Query */}
         {layout === 'list' && messages.length > 0 && (
           <div className="space-y-6">
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                {msg.role === 'model' && (
-                  <span className="text-[10px] font-bold tracking-wider text-gray-400 mb-1 ml-1 uppercase">
-                    {msg.source}
-                  </span>
-                )}
-                <div className={`max-w-[95%] rounded-2xl p-3 text-sm leading-relaxed shadow-sm ${msg.role === 'user'
-                  ? 'bg-blue-600 text-white rounded-br-none'
-                  : 'bg-white border border-gray-100 text-gray-700 rounded-bl-none'
-                  }`}>
-                  {msg.role === 'user' ? (
-                    msg.text
-                  ) : (
-                    <MessageContent
-                      content={msg.text}
-                      role={msg.role}
-                      source={msg.source}
-                      connectedModels={connectedModelList}
-                      onForward={handleForward}
-                    />
+            {(() => {
+              // Group messages by user query
+              const groups: { user: any; responses: any[] }[] = [];
+              messages.forEach(msg => {
+                if (msg.role === 'user') {
+                  groups.push({ user: msg, responses: [] });
+                } else if (groups.length > 0) {
+                  groups[groups.length - 1].responses.push(msg);
+                }
+              });
+
+              return groups.map((group) => (
+                <div key={group.user.id} className="space-y-3">
+                  {/* User message */}
+                  <div className="flex flex-col items-end">
+                    <div className="max-w-[95%] rounded-2xl p-3 text-sm leading-relaxed shadow-sm bg-blue-600 text-white rounded-br-none">
+                      {group.user.text}
+                    </div>
+                  </div>
+                  {/* Model responses with left border grouping */}
+                  {group.responses.length > 0 && (
+                    <div className="border-l-2 border-blue-200 pl-3 ml-1 space-y-3">
+                      {group.responses.map(msg => (
+                        <div key={msg.id} className="flex flex-col items-start">
+                          <span className="text-[10px] font-bold tracking-wider text-gray-400 mb-1 ml-1 uppercase">
+                            {msg.source}
+                          </span>
+                          <div className="max-w-[95%] rounded-2xl p-3 text-sm leading-relaxed shadow-sm bg-white border border-gray-100 text-gray-700 rounded-bl-none">
+                            {msg.loading && !msg.text ? (
+                              <span className="text-gray-400 flex items-center gap-1">
+                                <span className="flex gap-0.5">
+                                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                                </span>
+                                {msg.source ? `${msg.source.charAt(0).toUpperCase() + msg.source.slice(1)} 思考中...` : '思考中...'}
+                              </span>
+                            ) : (
+                              <MessageContent
+                                content={msg.text}
+                                role={msg.role}
+                                source={msg.source}
+                                connectedModels={connectedModelList}
+                                onForward={handleForward}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Compare Layout */}
-        {layout === 'compare' && messages.length > 0 && (
-          <div className="space-y-4">
-            {/* User Messages */}
-            {messages.filter(m => m.role === 'user').map(msg => (
-              <div key={msg.id} className="bg-blue-600 text-white rounded-xl p-3 text-sm">
-                {msg.text}
-              </div>
-            ))}
-
-            {/* Model Responses Grid */}
-            {(() => {
-              const modelMessages = messages.filter(m => m.role === 'model');
-              const uniqueSources = [...new Set(modelMessages.map(m => m.source))];
-
-              if (uniqueSources.length === 0) return null;
-
-              return (
-                <div className={`grid gap-3 ${uniqueSources.length >= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  {uniqueSources.map(source => {
-                    const sourceMessages = modelMessages.filter(m => m.source === source);
-                    const latestMsg = sourceMessages[sourceMessages.length - 1];
-
-                    return (
-                      <div key={source} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
-                        <div className="text-[10px] font-bold tracking-wider text-gray-400 mb-2 uppercase border-b pb-2">
-                          {source}
-                        </div>
-                        {latestMsg && (
-                          <div className="text-sm text-gray-700">
-                            <MessageContent
-                              content={latestMsg.text}
-                              role={latestMsg.role}
-                              source={latestMsg.source}
-                              connectedModels={connectedModelList}
-                              onForward={handleForward}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
+              ));
             })()}
           </div>
         )}
+
+        {/* Compare Layout - Tab Switching */}
+        {layout === 'compare' && messages.length > 0 && (
+          <div className="space-y-4">
+            {(() => {
+              // Group by user query for compare view too
+              const groups: { user: any; responses: any[] }[] = [];
+              messages.forEach(msg => {
+                if (msg.role === 'user') {
+                  groups.push({ user: msg, responses: [] });
+                } else if (groups.length > 0) {
+                  groups[groups.length - 1].responses.push(msg);
+                }
+              });
+
+              return groups.map((group) => {
+                const uniqueSources = [...new Set(group.responses.map(m => m.source))];
+                // Auto-select first tab if none selected or current selection not in this group
+                const activeTab = compareActiveModel && uniqueSources.includes(compareActiveModel)
+                  ? compareActiveModel
+                  : uniqueSources[0] || null;
+
+                const activeMsg = group.responses.find(m => m.source === activeTab);
+
+                return (
+                  <div key={group.user.id} className="space-y-2">
+                    {/* User message */}
+                    <div className="bg-blue-600 text-white rounded-xl p-3 text-sm">
+                      {group.user.text}
+                    </div>
+
+                    {/* Tab bar */}
+                    {uniqueSources.length > 0 && (
+                      <div>
+                        <div className="flex gap-1 border-b border-gray-200 pb-0">
+                          {uniqueSources.map(source => {
+                            const isActive = source === activeTab;
+                            const sourceMsg = group.responses.find(m => m.source === source);
+                            const sourceLoading = sourceMsg?.loading;
+                            return (
+                              <button
+                                key={source}
+                                onClick={() => setCompareActiveModel(source)}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors flex items-center gap-1.5 ${isActive
+                                  ? 'bg-white border border-gray-200 border-b-white -mb-px text-blue-600'
+                                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                  }`}
+                              >
+                                {sourceLoading && (
+                                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></span>
+                                )}
+                                {source.charAt(0).toUpperCase() + source.slice(1)}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Active tab content - full width */}
+                        {activeMsg && (
+                          <div className="bg-white border border-gray-200 border-t-0 rounded-b-xl p-4 text-sm text-gray-700">
+                            {activeMsg.loading && !activeMsg.text ? (
+                              <span className="text-gray-400 flex items-center gap-1">
+                                <span className="flex gap-0.5">
+                                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                                </span>
+                                {activeMsg.source ? `${activeMsg.source.charAt(0).toUpperCase() + activeMsg.source.slice(1)} 思考中...` : '思考中...'}
+                              </span>
+                            ) : (
+                              <MessageContent
+                                content={activeMsg.text}
+                                role={activeMsg.role}
+                                source={activeMsg.source}
+                                connectedModels={connectedModelList}
+                                onForward={handleForward}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        )}
+        <div ref={chatEndRef} />
       </main>
 
       {/* Input Area */}

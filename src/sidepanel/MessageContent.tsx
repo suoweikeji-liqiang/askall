@@ -47,7 +47,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({
 
     return (
         <div className="message-content-wrapper">
-            <div className="message-content">
+            <div className="message-content prose prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-0 prose-pre:p-0 prose-pre:bg-transparent prose-blockquote:my-0 prose-blockquote:p-0 prose-blockquote:border-0 prose-blockquote:not-italic">
                 <ReactMarkdown
                     components={{
                         code({ node, className, children, ...props }) {

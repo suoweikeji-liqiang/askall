@@ -7,15 +7,17 @@ Object.defineProperty(document, 'visibilityState', { get: () => 'visible', confi
 
 // ===== STATE =====
 let lastSentText = "";
-let lastKnownMessageText = ""; // Snapshot of last message BEFORE sending new request
-let initialMessageCount = 0; // Track message count before sending
-let isWaitingForResponse = false;
-let currentRequestId: string | null = null; // Track which request we're responding to
+let lastKnownMessageText = "";
+let initialMessageCount = 0;
+let currentRequestId: string | null = null;
+let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
+let observer: MutationObserver | null = null;
+let overallTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const STABILITY_DELAY = 3000;
 
 // ===== HELPER: Get AI assistant messages =====
 function getAssistantMessages() {
-    // Zhipu uses .chat-assistant with .markdown-prose for AI responses
-    // The text is inside the markdown-prose container
     const selectors = [
         'div.chat-assistant .markdown-prose',
         'div.chat-assistant',
@@ -33,44 +35,59 @@ function getAssistantMessages() {
     return document.querySelectorAll('div.chat-assistant');
 }
 
-// ===== HELPER: Check current response and send to sidepanel =====
+function sendCompletion(text: string) {
+    if (!currentRequestId) return;
+    console.log(`[Zhipu] Request ${currentRequestId} completed (text stable)`);
+    chrome.runtime.sendMessage({
+        type: 'AI_RESPONSE',
+        model: 'zhipu',
+        text: text,
+        requestId: currentRequestId,
+        isComplete: true
+    }).catch(() => { });
+    cleanup();
+}
+
+function cleanup() {
+    if (stabilityTimer) { clearTimeout(stabilityTimer); stabilityTimer = null; }
+    if (observer) { observer.disconnect(); observer = null; }
+    if (overallTimeout) { clearTimeout(overallTimeout); overallTimeout = null; }
+    currentRequestId = null;
+}
+
 function checkAndSendResponse(expectedRequestId?: string) {
-    // Only respond if we have an active request and it matches what's being polled
     if (!currentRequestId) return;
     if (expectedRequestId && expectedRequestId !== currentRequestId) return;
 
     const messages = getAssistantMessages();
 
-    // Only process NEW messages (more than initial count)
     if (messages.length > initialMessageCount) {
         const lastMessage = messages[messages.length - 1] as HTMLElement;
         const currentText = lastMessage.innerText?.trim();
 
-        // Must be different from snapshot AND from last sent text (avoid duplicates)
-        if (currentText && 
-            currentText !== lastSentText && 
+        if (currentText &&
+            currentText !== lastSentText &&
             currentText !== lastKnownMessageText) {
-            
+
             console.log(`[Zhipu] New message detected, length: ${currentText.length}`);
             lastSentText = currentText;
-            const isComplete = !isWaitingForResponse;
 
             chrome.runtime.sendMessage({
                 type: 'AI_RESPONSE',
                 model: 'zhipu',
                 text: currentText,
                 requestId: currentRequestId,
-                isComplete: isComplete
+                isComplete: false
             }).catch(() => { });
 
-            if (isComplete) {
-                console.log(`[Zhipu] Request ${currentRequestId} completed`);
-            }
+            if (stabilityTimer) clearTimeout(stabilityTimer);
+            stabilityTimer = setTimeout(() => {
+                sendCompletion(lastSentText);
+            }, STABILITY_DELAY);
         }
     }
 }
 
-// ===== MESSAGE LISTENER =====
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.type === 'INPUT_PROMPT') {
         fillAndSend(request.text, request.requestId).then(() => {
@@ -82,7 +99,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         return true;
     }
 
-    // Handle CHECK_RESPONSE from background polling
     if (request.type === 'CHECK_RESPONSE') {
         checkAndSendResponse(request.requestId);
         sendResponse({ status: 'checked' });
@@ -91,7 +107,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 
 async function fillAndSend(text: string, requestId?: string) {
-    // Try multiple input selectors
     const inputSelectors = [
         'textarea[placeholder*="输入"]',
         'textarea[placeholder*="问"]',
@@ -111,26 +126,23 @@ async function fillAndSend(text: string, requestId?: string) {
 
     if (!input) throw new Error("Input field not found - tried: " + inputSelectors.join(', '));
 
-    // Set the request ID for this request
+    cleanup();
+
     currentRequestId = requestId || Date.now().toString();
     console.log(`[Zhipu] Starting request ${currentRequestId}`);
 
-    // Capture initial message count and snapshot BEFORE sending
     const messages = getAssistantMessages();
     initialMessageCount = messages.length;
     console.log(`[Zhipu] Initial message count: ${initialMessageCount}`);
-    
-    // Take snapshot of last message to avoid sending stale responses
+
     if (messages.length > 0) {
         lastKnownMessageText = (messages[messages.length - 1] as HTMLElement).innerText?.trim() || "";
     } else {
         lastKnownMessageText = "";
     }
-    
-    lastSentText = "";
-    isWaitingForResponse = true;
 
-    // Set value based on element type
+    lastSentText = "";
+
     if (input instanceof HTMLTextAreaElement) {
         input.value = text;
     } else {
@@ -141,7 +153,6 @@ async function fillAndSend(text: string, requestId?: string) {
 
     await new Promise(r => setTimeout(r, 600));
 
-    // Try multiple send button selectors
     const sendButtonSelectors = [
         'button[aria-label*="发送"]',
         'button[aria-label*="Send"]',
@@ -170,9 +181,9 @@ async function fillAndSend(text: string, requestId?: string) {
 }
 
 function startResponseMonitor() {
-    console.log("Waiting for AI response (MutationObserver + CHECK_RESPONSE)...");
+    console.log("[Zhipu] Waiting for AI response...");
 
-    const observer = new MutationObserver((_mutations) => {
+    observer = new MutationObserver(() => {
         checkAndSendResponse();
     });
 
@@ -182,8 +193,11 @@ function startResponseMonitor() {
         characterData: true
     });
 
-    setTimeout(() => {
-        observer.disconnect();
-        isWaitingForResponse = false;
-    }, 180000);
+    overallTimeout = setTimeout(() => {
+        if (lastSentText && lastSentText !== lastKnownMessageText) {
+            sendCompletion(lastSentText);
+        } else {
+            cleanup();
+        }
+    }, 120000);
 }

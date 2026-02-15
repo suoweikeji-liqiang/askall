@@ -8,49 +8,78 @@ Object.defineProperty(document, 'visibilityState', { get: () => 'visible', confi
 
 // ===== STATE =====
 let lastSentText = "";
-let lastKnownMessageText = ""; // Snapshot of last message BEFORE sending new request
-let initialMessageCount = 0; // Track message count before sending
-let isWaitingForResponse = false;
-let currentRequestId: string | null = null; // Track which request we're responding to
+let lastKnownMessageText = "";
+let initialMessageCount = 0;
+let currentRequestId: string | null = null;
+let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
+let observer: MutationObserver | null = null;
+let overallTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const STABILITY_DELAY = 3000; // 3s no text change = complete
+
+// ===== HELPER: Send completion and clean up =====
+function sendCompletion(text: string) {
+    if (!currentRequestId) return;
+    console.log(`[ChatGPT] Request ${currentRequestId} completed (text stable)`);
+    chrome.runtime.sendMessage({
+        type: 'AI_RESPONSE',
+        model: 'chatgpt',
+        text: text,
+        requestId: currentRequestId,
+        isComplete: true
+    }).catch(() => { });
+    cleanup();
+}
+
+function cleanup() {
+    if (stabilityTimer) { clearTimeout(stabilityTimer); stabilityTimer = null; }
+    if (observer) { observer.disconnect(); observer = null; }
+    if (overallTimeout) { clearTimeout(overallTimeout); overallTimeout = null; }
+    currentRequestId = null;
+}
 
 // ===== HELPER: Check current response and send to sidepanel =====
 function checkAndSendResponse(expectedRequestId?: string) {
-    // Only respond if we have an active request and it matches what's being polled
     if (!currentRequestId) return;
     if (expectedRequestId && expectedRequestId !== currentRequestId) return;
 
     const messages = document.querySelectorAll('div[data-message-author-role="assistant"]');
 
-    // Only process NEW messages (more than initial count)
     if (messages.length > initialMessageCount) {
         const lastMessage = messages[messages.length - 1] as HTMLElement;
         const currentText = lastMessage.innerText;
 
-        // Must be different from snapshot AND from last sent text (avoid duplicates)
-        if (currentText && 
-            currentText !== lastSentText && 
+        if (currentText &&
+            currentText !== lastSentText &&
             currentText !== lastKnownMessageText) {
-            
+
             lastSentText = currentText;
 
-            // Check for stop button to determine completion
-            const stopButton = document.querySelector('button[aria-label="Stop generating"]') ||
-                document.querySelector('button[aria-label="停止生成"]');
-
-            const isComplete = !stopButton && !isWaitingForResponse;
-
+            // Send streaming update
             chrome.runtime.sendMessage({
                 type: 'AI_RESPONSE',
                 model: 'chatgpt',
                 text: currentText,
                 requestId: currentRequestId,
-                isComplete: isComplete
+                isComplete: false
             }).catch(() => { });
 
-            // If complete, clear the request
-            if (isComplete) {
-                console.log(`[ChatGPT] Request ${currentRequestId} completed`);
-            }
+            // Reset stability timer — if text stops changing for 3s, mark complete
+            if (stabilityTimer) clearTimeout(stabilityTimer);
+            stabilityTimer = setTimeout(() => {
+                sendCompletion(lastSentText);
+            }, STABILITY_DELAY);
+        }
+
+        // Also check: stop button gone = immediate completion
+        const stopButton = document.querySelector('button[aria-label="Stop generating"]') ||
+            document.querySelector('button[aria-label="停止生成"]');
+        if (!stopButton && lastSentText && lastSentText !== lastKnownMessageText) {
+            // No stop button and we have new text — likely done
+            if (stabilityTimer) clearTimeout(stabilityTimer);
+            stabilityTimer = setTimeout(() => {
+                sendCompletion(lastSentText);
+            }, 1000); // shorter delay when stop button is gone
         }
     }
 }
@@ -66,7 +95,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         return true;
     }
 
-    // Handle CHECK_RESPONSE from background polling
     if (request.type === 'CHECK_RESPONSE') {
         checkAndSendResponse(request.requestId);
         sendResponse({ status: 'checked' });
@@ -78,27 +106,25 @@ async function fillAndSend(text: string, requestId?: string) {
     const inputEl = document.querySelector('#prompt-textarea') as HTMLElement;
     if (!inputEl) throw new Error("Input element (textarea/div) not found");
 
-    // Set the request ID for this request
+    // Clean up any previous request
+    cleanup();
+
     currentRequestId = requestId || Date.now().toString();
     console.log(`[ChatGPT] Starting request ${currentRequestId}`);
 
-    // Capture initial message count and snapshot BEFORE sending
     const messages = document.querySelectorAll('div[data-message-author-role="assistant"]');
     initialMessageCount = messages.length;
-    
-    // Take snapshot of last message to avoid sending stale responses
+
     if (messages.length > 0) {
         lastKnownMessageText = (messages[messages.length - 1] as HTMLElement).innerText;
     } else {
         lastKnownMessageText = "";
     }
-    
+
     lastSentText = "";
-    isWaitingForResponse = true;
 
     inputEl.focus();
 
-    // Simulate Paste
     const dataTransfer = new DataTransfer();
     dataTransfer.setData('text/plain', text);
     const pasteEvent = new ClipboardEvent('paste', {
@@ -108,7 +134,6 @@ async function fillAndSend(text: string, requestId?: string) {
     });
     inputEl.dispatchEvent(pasteEvent);
 
-    // Backup text insertion
     if (inputEl.innerText.trim() === '') {
         inputEl.innerText = text;
         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
@@ -152,9 +177,9 @@ async function fillAndSend(text: string, requestId?: string) {
 }
 
 function startResponseMonitor() {
-    console.log("Waiting for AI response (MutationObserver + CHECK_RESPONSE)...");
+    console.log("[ChatGPT] Waiting for AI response...");
 
-    const observer = new MutationObserver((_mutations) => {
+    observer = new MutationObserver(() => {
         checkAndSendResponse();
     });
 
@@ -164,8 +189,12 @@ function startResponseMonitor() {
         characterData: true
     });
 
-    setTimeout(() => {
-        observer.disconnect();
-        isWaitingForResponse = false;
-    }, 180000);
+    // Safety timeout: force complete after 120s
+    overallTimeout = setTimeout(() => {
+        if (lastSentText && lastSentText !== lastKnownMessageText) {
+            sendCompletion(lastSentText);
+        } else {
+            cleanup();
+        }
+    }, 120000);
 }
